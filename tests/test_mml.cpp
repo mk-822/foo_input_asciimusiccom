@@ -199,5 +199,19 @@ int main() {
     return energy;
   };
   assert(render_y(0) > render_y(127) * 10.0);
+
+  // A written trailing rest contributes to the MML timeline, but sustained
+  // digital silence must not remain in the reported/rendered duration.
+  auto trailing_rest =
+      musiccom::parse_mml("4:T120 V15 O4 C4 R1\n", nofade);
+  const double untrimmed_duration = trailing_rest.duration;
+  assert(musiccom::trim_trailing_silence(trailing_rest, 48000, 0.0));
+  assert(trailing_rest.duration < untrimmed_duration - 0.25);
+  assert(trailing_rest.fade_end == untrimmed_duration);
+  musiccom::Player trimmed_player(std::move(trailing_rest), 48000, 0.0);
+  std::vector<float> trimmed_pcm(48000 * 2);
+  size_t trimmed_frames = trimmed_player.render(trimmed_pcm.data(), 48000);
+  assert(trimmed_frames > 0 && trimmed_frames < 30000);
+  assert(trimmed_player.render(trimmed_pcm.data(), 1) == 0);
   std::cout << "ok\n";
 }

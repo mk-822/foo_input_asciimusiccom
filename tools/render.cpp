@@ -15,6 +15,7 @@ int main(int argc, char **argv) {
   std::ifstream in(argv[1], std::ios::binary);
   std::string text((std::istreambuf_iterator<char>(in)), {});
   auto song = musiccom::parse_mml(text);
+  musiccom::trim_trailing_silence(song);
   musiccom::Player player(std::move(song));
   std::vector<float> pcm;
   std::vector<float> block(2048);

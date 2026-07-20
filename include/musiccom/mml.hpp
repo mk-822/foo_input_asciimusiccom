@@ -44,6 +44,9 @@ struct Song {
   std::map<int, Tone> tones;
   std::map<int, SsgEnvelope> envelopes;
   double duration = 0;
+  // The untrimmed end is retained so shortening an inaudible tail does not
+  // move the configured fade earlier and alter audible samples.
+  double fade_end = 0;
   std::string title;
 };
 struct ParseOptions {

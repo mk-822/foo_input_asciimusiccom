@@ -444,6 +444,7 @@ Song parse_mml(const std::string &bytes, const ParseOptions &opt) {
   }
   std::stable_sort(song.events.begin(), song.events.end(),
                    [](auto &a, auto &b) { return a.time < b.time; });
+  song.fade_end = song.duration;
   return song;
 }
 } // namespace musiccom

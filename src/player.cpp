@@ -267,6 +267,10 @@ struct Player::Impl : ymfm::ymfm_interface {
         envelope_active[ch] = false;
         ssg_mixer |= (uint8_t)(1u << c);
         write(7, ssg_mixer);
+        // Disabling the tone/noise inputs alone leaves the AY-style mixer at
+        // a constant high level.  Clear volume too, otherwise rests contain a
+        // DC sample value that is inaudible but defeats silence detection.
+        write(8 + c, 0);
         return;
       }
       restart_modulation(vibrato[ch]);
@@ -385,6 +389,7 @@ struct Player::Impl : ymfm::ymfm_interface {
   }
   size_t render(float *out, size_t n) {
     double total = song.duration;
+    double fade_end = song.fade_end > 0 ? song.fade_end : total;
     size_t done = 0;
     uint32_t native = chip.sample_rate(7987200);
     for (; done < n && frame < (uint64_t)std::ceil(total * rate);
@@ -452,8 +457,8 @@ struct Player::Impl : ymfm::ymfm_interface {
         chip_phase -= rate;
       }
       double gain = 1.0;
-      if (fade > 0 && now > total - fade)
-        gain = std::clamp((total - now) / fade, 0.0, 1.0);
+      if (fade > 0 && now > fade_end - fade)
+        gain = std::clamp((fade_end - now) / fade, 0.0, 1.0);
       double l = (y.data[0] + y.data[1] + y.data[2]) * gain / 32768.0;
       double r = (y.data[0] + y.data[1] + y.data[2]) * gain / 32768.0;
       out[done * 2] = (float)std::clamp(l, -1.0, 1.0);
@@ -481,4 +486,81 @@ void Player::seek(double sec) {
 }
 size_t Player::render(float *out, size_t n) { return p_->render(out, n); }
 double Player::duration() const { return p_->song.duration; }
+
+bool trim_trailing_silence(Song &song, uint32_t rate, double fade_seconds,
+                           float silence_threshold,
+                           double minimum_silence_seconds,
+                           double padding_seconds) {
+  if (song.duration <= 0 || rate == 0)
+    return false;
+
+  const double original_duration = song.duration;
+  if (song.fade_end <= 0)
+    song.fade_end = original_duration;
+
+  // Most songs are still sounding when the configured fade reaches its end.
+  // Avoid an expensive full render unless the event stream shows that every
+  // channel has actually been released for long enough to be a trim candidate.
+  std::array<bool, 6> keyed{};
+  double all_released_since = 0;
+  for (const auto &e : song.events) {
+    if (e.time > original_duration)
+      break;
+    bool releases = e.type == EventType::NoteOff ||
+                    (e.type == EventType::Rest && e.a == 0);
+    if (e.type != EventType::NoteOn && !releases)
+      continue;
+    bool was_keyed = std::any_of(keyed.begin(), keyed.end(),
+                                 [](bool value) { return value; });
+    keyed[e.channel] = !releases;
+    bool is_keyed = std::any_of(keyed.begin(), keyed.end(),
+                                [](bool value) { return value; });
+    if (was_keyed && !is_keyed)
+      all_released_since = e.time;
+    else if (!was_keyed && is_keyed)
+      all_released_since = -1;
+  }
+  if (std::any_of(keyed.begin(), keyed.end(),
+                  [](bool value) { return value; }) ||
+      all_released_since < 0 ||
+      original_duration - all_released_since < minimum_silence_seconds)
+    return false;
+
+  Player probe(song, rate, fade_seconds);
+  constexpr size_t block_frames = 4096;
+  std::vector<float> pcm(block_frames * 2);
+  uint64_t rendered_frames = 0;
+  uint64_t last_audible_frame = 0;
+  bool found_audible_sample = false;
+  for (;;) {
+    size_t count = probe.render(pcm.data(), block_frames);
+    if (!count)
+      break;
+    for (size_t i = 0; i < count; ++i) {
+      if (std::max(std::abs(pcm[i * 2]), std::abs(pcm[i * 2 + 1])) >
+          silence_threshold) {
+        last_audible_frame = rendered_frames + i + 1;
+        found_audible_sample = true;
+      }
+    }
+    rendered_frames += count;
+  }
+
+  const uint64_t minimum_silence_frames = (uint64_t)std::ceil(
+      std::max(0.0, minimum_silence_seconds) * rate);
+  if (rendered_frames < last_audible_frame + minimum_silence_frames)
+    return false;
+
+  const uint64_t padding_frames = (uint64_t)std::ceil(
+      std::max(0.0, padding_seconds) * rate);
+  uint64_t trimmed_frames = found_audible_sample
+                                ? std::min(rendered_frames,
+                                           last_audible_frame + padding_frames)
+                                : 0;
+  if (trimmed_frames >= rendered_frames)
+    return false;
+
+  song.duration = (double)trimmed_frames / rate;
+  return true;
+}
 } // namespace musiccom
