@@ -48,8 +48,9 @@ try {
     $localCommit = (& git rev-parse HEAD).Trim()
     $remoteCommit = (& git rev-parse "origin/$branch").Trim()
     if ($localCommit -ne $remoteCommit) { throw "Local $branch is not synchronized with origin/$branch" }
-    $tagCommit = (& git rev-list -n 1 $tag 2>$null)
-    if ($LASTEXITCODE -eq 0 -and $tagCommit.Trim() -ne $localCommit) {
+    $existingTag = (& git tag --list $tag).Trim()
+    $tagCommit = if ($existingTag) { (& git rev-list -n 1 $tag).Trim() } else { $null }
+    if ($tagCommit -and $tagCommit -ne $localCommit) {
         throw "Tag $tag already exists at a different commit"
     }
 
