@@ -59,6 +59,35 @@ int main() {
         ++porta_off;
     }
   assert(porta_on == 1 && porta_off == 1 && porta_seconds > 0);
+  auto controls = musiccom::parse_mml(
+      "1:T120 N-128 P7 C4 I32,4,8 D4 U2,3 E4\n"
+      "4:T120 S13 M1000 @0 C4\n",
+      nofade);
+  bool detune_seen = false, vibrato_seen = false, tremolo_seen = false;
+  bool shape_seen = false, period_seen = false;
+  for (auto &e : controls.events) {
+    if (e.type == musiccom::EventType::Detune)
+      detune_seen = e.a == -128;
+    else if (e.type == musiccom::EventType::Vibrato)
+      vibrato_seen = e.a == 32 && e.b == 4 && e.c == 8 && e.value > 0;
+    else if (e.type == musiccom::EventType::Tremolo)
+      tremolo_seen = e.a == 2 && e.b == 3 && e.c == 0 && e.value > 0;
+    else if (e.type == musiccom::EventType::SsgEnvelopeShape)
+      shape_seen = e.channel == 3 && e.a == 13;
+    else if (e.type == musiccom::EventType::SsgEnvelopePeriod)
+      period_seen = e.channel == 3 && e.a == 1000;
+  }
+  assert(detune_seen && vibrato_seen && tremolo_seen);
+  assert(shape_seen && period_seen);
+  auto hardware_ssg =
+      musiccom::parse_mml("4:T120 V15 M1000 S8 O4 C1\n", nofade);
+  musiccom::Player hardware_ssg_player(std::move(hardware_ssg));
+  std::vector<float> hardware_pcm(24000 * 2);
+  assert(hardware_ssg_player.render(hardware_pcm.data(), 24000) == 24000);
+  double hardware_energy = 0;
+  for (float sample : hardware_pcm)
+    hardware_energy += std::abs(sample);
+  assert(hardware_energy > 1.0);
   auto legacy_loop = musiccom::parse_mml("1:T120 {99 C4}\n", loop2_nofade);
   assert(std::abs(legacy_loop.duration - 1.0 / 1.1) < 1e-6);
   auto omitted_loop = musiccom::parse_mml("1:T120 { C4}\n", loop2_nofade);

@@ -123,7 +123,7 @@ bool has_tie_after_boundary_commands(const std::string &s, size_t p) {
   }
 }
 void parse_track(int ch, std::string s, Song &song, double initial_tempo) {
-  int octave = 4, deflen = 4, volume = 12, tone = 0, gate = 8, noise = 0;
+  int octave = 4, deflen = 4, volume = 12, tone = 0, gate = 8;
   bool defdot = false;
   double tempo = initial_tempo, time = 0;
   bool continuing = false;
@@ -180,8 +180,8 @@ void parse_track(int ch, std::string s, Song &song, double initial_tempo) {
     }
     if (c == 'N') {
       ++p;
-      noise = integer(s, p, noise);
-      song.events.push_back({time, EventType::Noise, ch, noise, 0});
+      int detune = std::clamp(integer(s, p, 0), -255, 255);
+      song.events.push_back({time, EventType::Detune, ch, detune, 0});
       continue;
     }
     if (c == 'Y') {
@@ -195,10 +195,49 @@ void parse_track(int ch, std::string s, Song &song, double initial_tempo) {
     }
     if (c == 'P') {
       ++p;
-      int amount = std::max(0, integer(s, p, 0));
-      double seconds = note_length(64, false, tempo) * amount;
+      int amount = std::clamp(integer(s, p, 0), 0, 255);
+      double tick_seconds = note_length(64, false, tempo);
       song.events.push_back(
-          {time, EventType::Portamento, ch, amount, 0, seconds});
+          {time, EventType::Portamento, ch, amount, 0, tick_seconds});
+      continue;
+    }
+    if (c == 'I' || c == 'U') {
+      char command = c;
+      ++p;
+      int amount = std::clamp(integer(s, p, 0, false), 0, 255);
+      int period = 1, delay = 0;
+      while (p < s.size() && std::isspace((unsigned char)s[p]))
+        ++p;
+      if (p < s.size() && s[p] == ',') {
+        ++p;
+        period = std::clamp(integer(s, p, 1, false), 0, 255);
+        while (p < s.size() && std::isspace((unsigned char)s[p]))
+          ++p;
+        if (p < s.size() && s[p] == ',') {
+          ++p;
+          delay = std::clamp(integer(s, p, 0, false), 0, 255);
+        }
+      }
+      // MUSIC.COM treats a zero period as one tick (1067h/1085h).
+      period = std::max(1, period);
+      song.events.push_back(
+          {time,
+           command == 'I' ? EventType::Vibrato : EventType::Tremolo,
+           ch, amount, period, note_length(64, false, tempo), delay});
+      continue;
+    }
+    if (c == 'S') {
+      ++p;
+      int shape = std::clamp(integer(s, p, 0, false), 0, 15);
+      song.events.push_back(
+          {time, EventType::SsgEnvelopeShape, ch, shape, 0});
+      continue;
+    }
+    if (c == 'M') {
+      ++p;
+      int period = std::clamp(integer(s, p, 0, false), 0, 65535);
+      song.events.push_back(
+          {time, EventType::SsgEnvelopePeriod, ch, period, 0});
       continue;
     }
     if (c == '>') {
@@ -245,17 +284,11 @@ void parse_track(int ch, std::string s, Song &song, double initial_tempo) {
           song.events.push_back(
               {time + dur * gate / 8.0, EventType::NoteOff, ch, 0, 0});
         continuing = tie;
-      } else
+      } else {
+        song.events.push_back({time, EventType::Rest, ch, c == 'W', 0});
         continuing = false;
+      }
       time += dur;
-      continue;
-    } // unsupported modulation/portamento: consume command and numeric
-      // arguments
-    if (std::strchr("IUSM", c)) {
-      ++p;
-      while (p < s.size() && (std::isdigit((unsigned char)s[p]) ||
-                              s[p] == '-' || s[p] == '+' || s[p] == ','))
-        ++p;
       continue;
     }
     ++p;

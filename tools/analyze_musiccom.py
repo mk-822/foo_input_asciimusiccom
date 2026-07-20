@@ -5,6 +5,9 @@ from capstone import Cs, CS_ARCH_X86, CS_MODE_16
 
 ap=argparse.ArgumentParser();ap.add_argument("binary",type=Path);ap.add_argument("-o","--output",type=Path)
 a=ap.parse_args();data=a.binary.read_bytes();md=Cs(CS_ARCH_X86,CS_MODE_16);md.detail=True
+# MUSIC.COM interleaves code and lookup tables.  Keep walking past data bytes so
+# later parser and sequencer routines remain visible in the annotated listing.
+md.skipdata = True
 lines=[]
 for i in md.disasm(data,0x100):
     mark=""

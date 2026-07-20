@@ -16,6 +16,12 @@ Linear disassembly identifies the PC-98 OPN/OPNA base ports directly:
 
 The cluster at file addresses around `0CD7h`–`0DBCh` is the first target for reconstructing the register-write helpers. Calls into that cluster should be named before relying on the linear disassembly, because embedded tables can otherwise be misidentified as instructions.
 
+The reference manual defines no ADPCM MML command, and the binary contains no
+direct loads of the YM2608 secondary address/data ports `018Ch`/`018Eh`. ADPCM
+is therefore not considered a missing MUSIC.COM feature. The manual's hidden
+`D:` rhythm part is explicitly discouraged and is outside the normal
+compatibility target.
+
 ## Differential-trace plan
 
 1. Boot the reference program in a PC-98 emulator with I/O tracing enabled.
@@ -23,5 +29,24 @@ The cluster at file addresses around `0CD7h`–`0DBCh` is the first target for r
 3. Compare those logs against `musiccom::Event` output and YM2608 writes from `Player`.
 4. Probe boundaries first: dotted notes, `Q1/Q8`, ties, tempo changes, nested loops, signed `N/U/I`, and tone changes during a held note.
 5. Turn every discovered quirk into a small regression test before changing the native sequencer.
+
+## Sequencer state confirmed from Ver. 2.21
+
+The channel work area is 0x93 bytes.  The command handlers and the timer update
+routine expose the following behavior:
+
+- `N` stores a signed magnitude and adjusts the chip frequency number by about
+  1/256 semitone (`0B00h`--`0C10h`).
+- `P` stores an 8-bit step count.  At each 64th-note timer tick it linearly
+  interpolates the FM F-number or SSG period, rather than interpolating MIDI
+  note numbers (`1470h`--`1563h`, `12E9h`--`1304h`).
+- `I` and `U` each store amplitude, period, and delay bytes.  Their timer state
+  alternates a signed offset as a square wave; zero periods are promoted to one
+  tick (`105Dh`--`109Ah`, `1280h`--`12E9h`).
+- `S` enables the SSG hardware envelope and stores its shape.  `M` writes the
+  16-bit period to registers 11/12.  The shape register is written on key-on so
+  the envelope restarts (`0FE6h`--`1010h`, `1691h`--`16AAh`).
+
+These offsets are load addresses for the `.COM` image (file offset plus 0100h).
 
 `tools/analyze_musiccom.py` regenerates the annotated 16-bit listing. The reference binary itself is intentionally not copied into this repository.

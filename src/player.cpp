@@ -19,11 +19,22 @@ struct Player::Impl : ymfm::ymfm_interface {
   std::array<size_t, 6> envelope_index{};
   std::array<bool, 6> envelope_active{};
   struct PitchRamp {
-    double start = 0, target = 0;
-    uint64_t total = 0, elapsed = 0;
+    double current = 0, target = 0, step = 0;
+    uint64_t step_frames = 1, next_frame = 0;
+    unsigned remaining = 0;
   };
-  std::array<double, 6> pitch{}, portamento_seconds{};
+  struct SquareModulation {
+    int amount = 0, offset = 0;
+    uint64_t period_frames = 1, delay_frames = 0, next_frame = 0;
+    bool waiting_for_delay = false;
+  };
+  std::array<int, 6> detune{}, previous_midi{};
+  std::array<unsigned, 6> portamento_ticks{};
+  std::array<double, 6> base_hz{}, portamento_tick_seconds{};
   std::array<PitchRamp, 6> ramp{};
+  std::array<SquareModulation, 6> vibrato{}, tremolo{};
+  std::array<bool, 6> ssg_hardware_envelope{};
+  std::array<int, 6> ssg_envelope_shape{};
   uint8_t ssg_mixer = 0x3f;
   explicit Impl(Song s, uint32_t r, double f)
       : song(std::move(s)), rate(r), fade(f), chip(*this) {
@@ -41,9 +52,16 @@ struct Player::Impl : ymfm::ymfm_interface {
     envelope_next_frame.fill(0);
     envelope_index.fill(0);
     envelope_active.fill(false);
-    pitch.fill(NAN);
-    portamento_seconds.fill(0);
+    detune.fill(0);
+    previous_midi.fill(-1);
+    portamento_ticks.fill(0);
+    base_hz.fill(0);
+    portamento_tick_seconds.fill(0);
     ramp.fill({});
+    vibrato.fill({});
+    tremolo.fill({});
+    ssg_hardware_envelope.fill(false);
+    ssg_envelope_shape.fill(0);
     ssg_mixer = 0x3f;
     write(0x29, 0x80);
     write(7, ssg_mixer);
@@ -61,6 +79,17 @@ struct Player::Impl : ymfm::ymfm_interface {
     v = std::clamp(v, 0, 15);
     return v == 0 ? 127 : (15 - v) * 2;
   }
+  int effective_volume(int ch) const {
+    return std::clamp(volume[ch] + tremolo[ch].offset, 0, 15);
+  }
+  int fm_volume_attenuation(int ch) const {
+    if (volume[ch] == 0)
+      return 127;
+    // The FM driver applies U directly in TL units after scaling V; a positive
+    // square-wave phase therefore reduces attenuation (111Eh--1167h).
+    return std::clamp(volume_attenuation(volume[ch]) - tremolo[ch].offset, 0,
+                      127);
+  }
   void apply_tone(int ch, int id) {
     if (ch >= 3)
       return;
@@ -75,7 +104,7 @@ struct Player::Impl : ymfm::ymfm_interface {
       int dt = o.dt < 0 ? std::max(0, 8 + o.dt) : o.dt;
       int tl =
           o.tl +
-          (is_carrier(t.algorithm, op) ? volume_attenuation(volume[ch]) : 0);
+          (is_carrier(t.algorithm, op) ? fm_volume_attenuation(ch) : 0);
       write(0x30 + r, (dt & 7) << 4 | (o.ml & 15));
       write(0x40 + r, std::clamp(tl, 0, 127));
       write(0x50 + r, (o.ks & 3) << 6 | (o.ar & 31));
@@ -87,8 +116,21 @@ struct Player::Impl : ymfm::ymfm_interface {
     write(0xb4 + ch, 0xc0);
   }
   void apply_volume(int ch) {
-    if (ch >= 3)
+    if (ch >= 3) {
+      int c = ch - 3;
+      if (ssg_hardware_envelope[ch]) {
+        write(8 + c, 0x10);
+      } else if (envelope_active[ch]) {
+        auto it = song.envelopes.find(tone[ch]);
+        if (it != song.envelopes.end() &&
+            envelope_index[ch] < it->second.levels.size())
+          write_ssg_envelope_level(ch,
+                                   it->second.levels[envelope_index[ch]]);
+      } else {
+        write(8 + c, effective_volume(ch));
+      }
       return;
+    }
     auto it = song.tones.find(tone[ch]);
     if (it == song.tones.end())
       return;
@@ -96,12 +138,19 @@ struct Player::Impl : ymfm::ymfm_interface {
     static const int slot[] = {0, 8, 4, 12};
     for (int op = 0; op < 4; op++)
       if (is_carrier(t.algorithm, op)) {
-        int tl = t.op[op].tl + volume_attenuation(volume[ch]);
+        int tl = t.op[op].tl + fm_volume_attenuation(ch);
         write(0x40 + ch + slot[op], std::clamp(tl, 0, 127));
       }
   }
-  void set_pitch(int ch, double midi) {
-    double hz = 440.0 * std::pow(2.0, (midi - 69.0) / 12.0);
+  static double midi_hz(double midi) {
+    return 440.0 * std::pow(2.0, (midi - 69.0) / 12.0);
+  }
+  static double ramp_value_hz(int ch, double value) {
+    // FM portamento is linear in F-number (and therefore frequency), while
+    // SSG portamento is linear in the inverse-frequency tone period.
+    return ch >= 3 ? 7987200.0 / (4 * 16 * value) : value;
+  }
+  void set_pitch_hz(int ch, double hz) {
     if (ch < 3) {
       int block = 1;
       double fnum = hz * 144.0 * (1 << 20) / 7987200.0;
@@ -123,31 +172,63 @@ struct Player::Impl : ymfm::ymfm_interface {
       write(c * 2, period & 255);
       write(c * 2 + 1, period >> 8);
     }
-    pitch[ch] = midi;
+  }
+  void write_current_pitch(int ch) {
+    if (base_hz[ch] <= 0)
+      return;
+    // N/I use 1/256-semitone units in MUSIC.COM.  The original performs the
+    // equivalent adjustment in the chip's frequency-number domain.
+    double ratio = std::pow(2.0, vibrato[ch].offset / (256.0 * 12.0));
+    set_pitch_hz(ch, base_hz[ch] * ratio);
+  }
+  void restart_modulation(SquareModulation &m) {
+    if (m.amount == 0) {
+      m.offset = 0;
+      return;
+    }
+    m.waiting_for_delay = m.delay_frames != 0;
+    m.offset = m.waiting_for_delay ? 0 : m.amount;
+    m.next_frame = frame +
+                   (m.waiting_for_delay ? m.delay_frames : m.period_frames);
   }
   void start_pitch(int ch, int midi) {
-    double from = portamento_seconds[ch] > 0 && std::isfinite(pitch[ch])
-                      ? pitch[ch]
-                      : midi;
-    set_pitch(ch, from);
-    if (from != midi) {
-      uint64_t frames = std::max<uint64_t>(
-          1, (uint64_t)std::llround(portamento_seconds[ch] * rate));
-      ramp[ch] = {from, (double)midi, frames, 0};
+    double target = midi_hz(midi + detune[ch] / 256.0);
+    if (portamento_ticks[ch] > 0 && previous_midi[ch] >= 0) {
+      double from = midi_hz(previous_midi[ch] + detune[ch] / 256.0);
+      double from_value = ch >= 3 ? 7987200.0 / (4 * 16 * from) : from;
+      double target_value =
+          ch >= 3 ? 7987200.0 / (4 * 16 * target) : target;
+      unsigned steps = portamento_ticks[ch] + 1;
+      uint64_t step_frames = std::max<uint64_t>(
+          1, (uint64_t)std::llround(portamento_tick_seconds[ch] * rate));
+      base_hz[ch] = from;
+      ramp[ch] = {from_value, target_value,
+                  (target_value - from_value) / steps, step_frames,
+                  frame + step_frames, steps};
     } else {
+      base_hz[ch] = target;
       ramp[ch] = {};
     }
+    previous_midi[ch] = midi;
+    write_current_pitch(ch);
   }
   void write_ssg_envelope_level(int ch, int level) {
     int c = ch - 3;
     // MUSIC.COM combines the channel volume and software-envelope level as
     // attenuation values: CL = V + ENV - 15, saturated at zero (1018h).
-    int output = std::clamp(std::clamp(volume[ch], 0, 15) +
+    int output = std::clamp(std::clamp(effective_volume(ch), 0, 15) +
                                 std::clamp(level, 0, 15) - 15,
                             0, 15);
     write(8 + c, output);
   }
   void start_ssg_envelope(int ch) {
+    if (ssg_hardware_envelope[ch]) {
+      envelope_active[ch] = false;
+      write(8 + ch - 3, 0x10);
+      // Writing the shape register restarts the hardware envelope.
+      write(13, ssg_envelope_shape[ch] & 15);
+      return;
+    }
     auto it = song.envelopes.find(tone[ch]);
     if (tone[ch] == 0 || it == song.envelopes.end() ||
         it->second.levels.empty()) {
@@ -172,6 +253,8 @@ struct Player::Impl : ymfm::ymfm_interface {
         ymfm::ym2608::output_data keyoff_clock[3]{};
         chip.generate(keyoff_clock, 3);
       }
+      restart_modulation(vibrato[ch]);
+      restart_modulation(tremolo[ch]);
       start_pitch(ch, midi);
       if (!legato)
         write(0x28, 0xf0 | ch);
@@ -183,6 +266,8 @@ struct Player::Impl : ymfm::ymfm_interface {
         write(7, ssg_mixer);
         return;
       }
+      restart_modulation(vibrato[ch]);
+      restart_modulation(tremolo[ch]);
       start_pitch(ch, midi);
       if (!legato) {
         start_ssg_envelope(ch);
@@ -199,23 +284,97 @@ struct Player::Impl : ymfm::ymfm_interface {
     case EventType::NoteOff:
       note(e.channel, 0, false);
       break;
+    case EventType::Rest:
+      previous_midi[e.channel] = -1;
+      ramp[e.channel] = {};
+      if (e.a == 0)
+        note(e.channel, 0, false);
+      break;
     case EventType::Tone:
       tone[e.channel] = e.a;
       if (e.channel < 3)
         apply_tone(e.channel, e.a);
-      else
+      else {
+        // @ selects a software envelope (or @0/fixed volume), overriding
+        // hardware S/M mode just as MUSIC.COM does at 120dh.
+        ssg_hardware_envelope[e.channel] = false;
         envelope_step_frames[e.channel] = std::max<uint64_t>(
             1, (uint64_t)std::llround((double)e.b * rate / 1000000.0));
+      }
       break;
     case EventType::Volume:
       volume[e.channel] = e.a;
       apply_volume(e.channel);
       break;
+    case EventType::Detune:
+      detune[e.channel] = e.a;
+      break;
     case EventType::Register:
       write(e.a, e.b);
       break;
     case EventType::Portamento:
-      portamento_seconds[e.channel] = e.value;
+      portamento_ticks[e.channel] = (unsigned)e.a;
+      portamento_tick_seconds[e.channel] = e.value;
+      // P and I are mutually exclusive; the later command wins.
+      if (e.a != 0) {
+        vibrato[e.channel] = {};
+        write_current_pitch(e.channel);
+      } else if (ramp[e.channel].remaining) {
+        base_hz[e.channel] =
+            ramp_value_hz(e.channel, ramp[e.channel].target);
+        ramp[e.channel] = {};
+        write_current_pitch(e.channel);
+      }
+      break;
+    case EventType::Vibrato: {
+      auto &m = vibrato[e.channel];
+      m = {};
+      m.amount = e.a;
+      m.period_frames = std::max<uint64_t>(
+          1, (uint64_t)std::llround(e.b * e.value * rate));
+      m.delay_frames =
+          (uint64_t)std::llround(e.c * e.value * rate);
+      if (e.a != 0) {
+        if (ramp[e.channel].remaining) {
+          base_hz[e.channel] =
+              ramp_value_hz(e.channel, ramp[e.channel].target);
+          ramp[e.channel] = {};
+        }
+        portamento_ticks[e.channel] = 0;
+        tremolo[e.channel] = {};
+      }
+      write_current_pitch(e.channel);
+      break;
+    }
+    case EventType::Tremolo: {
+      auto &m = tremolo[e.channel];
+      m = {};
+      m.amount = e.a;
+      m.period_frames = std::max<uint64_t>(
+          1, (uint64_t)std::llround(e.b * e.value * rate));
+      m.delay_frames =
+          (uint64_t)std::llround(e.c * e.value * rate);
+      if (e.a != 0) {
+        vibrato[e.channel] = {};
+        write_current_pitch(e.channel);
+      }
+      apply_volume(e.channel);
+      break;
+    }
+    case EventType::SsgEnvelopeShape:
+      if (e.channel >= 3) {
+        ssg_hardware_envelope[e.channel] = true;
+        envelope_active[e.channel] = false;
+        ssg_envelope_shape[e.channel] = e.a & 15;
+      }
+      break;
+    case EventType::SsgEnvelopePeriod:
+      if (e.channel >= 3) {
+        ssg_hardware_envelope[e.channel] = true;
+        envelope_active[e.channel] = false;
+        write(11, e.a & 255);
+        write(12, (e.a >> 8) & 255);
+      }
       break;
     default:
       break;
@@ -232,12 +391,42 @@ struct Player::Impl : ymfm::ymfm_interface {
         dispatch(song.events[event++]);
       for (int ch = 0; ch < 6; ++ch) {
         auto &r = ramp[ch];
-        if (r.total && r.elapsed < r.total) {
-          ++r.elapsed;
-          double position = (double)r.elapsed / r.total;
-          set_pitch(ch, r.start + (r.target - r.start) * position);
-          if (r.elapsed == r.total)
+        bool pitch_changed = false;
+        while (r.remaining && frame >= r.next_frame) {
+          if (--r.remaining == 0) {
+            base_hz[ch] = ramp_value_hz(ch, r.target);
             r = {};
+          } else {
+            r.current += r.step;
+            base_hz[ch] = ramp_value_hz(ch, r.current);
+            r.next_frame += r.step_frames;
+          }
+          pitch_changed = true;
+        }
+        auto &vib = vibrato[ch];
+        if (vib.amount != 0 && frame >= vib.next_frame) {
+          if (vib.waiting_for_delay) {
+            vib.waiting_for_delay = false;
+            vib.offset = vib.amount;
+          } else {
+            vib.offset = vib.offset > 0 ? -vib.amount : vib.amount;
+          }
+          vib.next_frame = frame + vib.period_frames;
+          pitch_changed = true;
+        }
+        if (pitch_changed)
+          write_current_pitch(ch);
+
+        auto &tre = tremolo[ch];
+        if (tre.amount != 0 && frame >= tre.next_frame) {
+          if (tre.waiting_for_delay) {
+            tre.waiting_for_delay = false;
+            tre.offset = tre.amount;
+          } else {
+            tre.offset = tre.offset > 0 ? -tre.amount : tre.amount;
+          }
+          tre.next_frame = frame + tre.period_frames;
+          apply_volume(ch);
         }
       }
       for (int ch = 3; ch < 6; ++ch) {

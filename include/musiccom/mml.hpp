@@ -21,17 +21,23 @@ struct SsgEnvelope {
 enum class EventType {
   NoteOn,
   NoteOff,
+  Rest,
   Tone,
   Volume,
-  Noise,
+  Detune,
   Register,
-  Portamento
+  Portamento,
+  Vibrato,
+  Tremolo,
+  SsgEnvelopeShape,
+  SsgEnvelopePeriod
 };
 struct Event {
   double time = 0;
   EventType type = EventType::NoteOff;
   int channel = 0, a = 0, b = 0;
   double value = 0;
+  int c = 0;
 };
 struct Song {
   std::vector<Event> events;
