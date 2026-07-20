@@ -55,6 +55,18 @@ build\Release\musiccom_render.exe input.mml output.wav
 
 MUSIC.COM Ver. 2.21 のバイナリ解析メモは [docs/binary-analysis.md](docs/binary-analysis.md) にあります。これは実装仕様ではなく、互換性調査時の参考資料です。
 
+## Release
+
+[GitHub CLI](https://cli.github.com/) をインストールして認証後、`origin` と同期した
+クリーンなブランチから次のコマンドを実行します。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/release.ps1
+```
+
+ソース内のバージョン確認、パッケージのビルド、`vX.Y.Z` タグの作成と push、
+`.fb2k-component` の GitHub Releases への公開を一括で行います。
+
 ## Third-party licenses
 
 - foobar2000 SDK: SDK license（`third_party/foobar2000_sdk/sdk-license.txt`）
