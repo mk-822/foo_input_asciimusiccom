@@ -14,8 +14,8 @@ $artifact = Join-Path $projectRoot "dist\foo_input_asciimusiccom.fb2k-component"
 
 function Invoke-Checked {
     param(
-        [Parameter(Mandatory, Position = 0)][string]$Program,
-        [Parameter(Position = 1, ValueFromRemainingArguments = $true)][string[]]$Arguments
+        [Parameter(Mandatory)][string]$Program,
+        [string[]]$Arguments = @()
     )
     & $Program @Arguments
     if ($LASTEXITCODE -ne 0) { throw "$Program failed with exit code $LASTEXITCODE" }
@@ -40,14 +40,14 @@ try {
     $gh = Get-Command gh -ErrorAction SilentlyContinue
     $ghPath = if ($gh) { $gh.Source } else { Join-Path $env:ProgramFiles "GitHub CLI\gh.exe" }
     if (-not (Test-Path -LiteralPath $ghPath)) { throw "GitHub CLI (gh) is required: https://cli.github.com/" }
-    Invoke-Checked $ghPath auth status
+    Invoke-Checked -Program $ghPath -Arguments @('auth', 'status')
 
     $status = & git status --porcelain
     if ($LASTEXITCODE -ne 0) { throw "git status failed" }
     if ($status) { throw "Working tree is not clean. Commit or stash changes before releasing." }
     $branch = (& git branch --show-current).Trim()
     if ($LASTEXITCODE -ne 0 -or -not $branch) { throw "Could not determine the current branch" }
-    Invoke-Checked git fetch origin $branch --tags
+    Invoke-Checked -Program git -Arguments @('fetch', 'origin', $branch, '--tags')
     $localCommit = (& git rev-parse HEAD).Trim()
     $remoteCommit = (& git rev-parse "origin/$branch").Trim()
     if ($localCommit -ne $remoteCommit) { throw "Local $branch is not synchronized with origin/$branch" }
@@ -59,17 +59,20 @@ try {
     }
 
     if (-not $SkipBuild) {
-        Invoke-Checked powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "build.ps1") -Configuration Release
+        Invoke-Checked -Program powershell -Arguments @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+            (Join-Path $PSScriptRoot "build.ps1"), '-Configuration', 'Release'
+        )
     }
     if (-not (Test-Path -LiteralPath $artifact)) { throw "Release artifact was not created: $artifact" }
 
-    if (-not $tagCommit) { Invoke-Checked git tag -a $tag -m "Release $tag" }
+    if (-not $tagCommit) { Invoke-Checked -Program git -Arguments @('tag', '-a', $tag, '-m', "Release $tag") }
     try {
-        Invoke-Checked git push origin $tag
+        Invoke-Checked -Program git -Arguments @('push', 'origin', $tag)
         $releaseArgs = @('release', 'create', $tag, $artifact, '--title', $tag, '--verify-tag')
         if ($Draft) { $releaseArgs += '--draft' }
         if ($Notes) { $releaseArgs += @('--notes', $Notes) } else { $releaseArgs += '--generate-notes' }
-        Invoke-Checked $ghPath @releaseArgs
+        Invoke-Checked -Program $ghPath -Arguments $releaseArgs
     }
     catch {
         Write-Warning "The tag may already have been pushed. Fix the error, then create the release for that tag."
