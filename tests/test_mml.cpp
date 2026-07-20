@@ -88,6 +88,24 @@ int main() {
   for (float sample : hardware_pcm)
     hardware_energy += std::abs(sample);
   assert(hardware_energy > 1.0);
+  // MUSIC.COM's previous-note work fields start at O0 C.  A leading P command
+  // must therefore glide the very first note instead of starting at its final
+  // pitch (COP01 track 3).
+  auto first_porta =
+      musiccom::parse_mml("4:T120 V15 P16 O4 C1\n", nofade);
+  musiccom::Player first_porta_player(std::move(first_porta));
+  std::vector<float> first_porta_pcm(48000 * 2);
+  assert(first_porta_player.render(first_porta_pcm.data(), 48000) == 48000);
+  auto positive_crossings = [&](size_t begin, size_t end) {
+    int count = 0;
+    for (size_t i = begin; i + 1 < end; ++i)
+      if (first_porta_pcm[i * 2] <= 0 && first_porta_pcm[(i + 1) * 2] > 0)
+        ++count;
+    return count;
+  };
+  int early_pitch = positive_crossings(2400, 9600);
+  int settled_pitch = positive_crossings(28800, 38400);
+  assert(early_pitch > 0 && settled_pitch > early_pitch * 3);
   auto legacy_loop = musiccom::parse_mml("1:T120 {99 C4}\n", loop2_nofade);
   assert(std::abs(legacy_loop.duration - 1.0 / 1.1) < 1e-6);
   auto omitted_loop = musiccom::parse_mml("1:T120 { C4}\n", loop2_nofade);

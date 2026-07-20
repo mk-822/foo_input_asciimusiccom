@@ -40,6 +40,8 @@ routine expose the following behavior:
 - `P` stores an 8-bit step count.  At each 64th-note timer tick it linearly
   interpolates the FM F-number or SSG period, rather than interpolating MIDI
   note numbers (`1470h`--`1563h`, `12E9h`--`1304h`).
+  The previous-note fields initialize to O0 C, so portamento also applies to
+  the first note of a track (`0A77h`, `0AB0h`, `0AB4h`).
 - `I` and `U` each store amplitude, period, and delay bytes.  Their timer state
   alternates a signed offset as a square wave; zero periods are promoted to one
   tick (`105Dh`--`109Ah`, `1280h`--`12E9h`).

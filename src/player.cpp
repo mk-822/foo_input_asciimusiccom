@@ -53,7 +53,10 @@ struct Player::Impl : ymfm::ymfm_interface {
     envelope_index.fill(0);
     envelope_active.fill(false);
     detune.fill(0);
-    previous_midi.fill(-1);
+    // MUSIC.COM initializes the previous-note fields to O0 C, not to a rest
+    // (0A77h/0AB0h/0AB4h).  Consequently P is active even on the first note;
+    // COP01 track 3 relies on the initial O0 C -> O4 C rise.
+    previous_midi.fill(12);
     portamento_ticks.fill(0);
     base_hz.fill(0);
     portamento_tick_seconds.fill(0);
