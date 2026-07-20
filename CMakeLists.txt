@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(foo_musiccom VERSION 0.1.16 LANGUAGES CXX)
+project(foo_input_asciimusiccom VERSION 0.1.16 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -23,6 +23,7 @@ if(BUILD_TESTING)
 endif()
 
 # The foobar2000 SDK consists of several MSBuild projects with configuration
-# mappings of their own. Build foo_musiccom.vcxproj (or run tools/build.ps1)
+# mappings of their own. Build foo_input_asciimusiccom.vcxproj (or run
+# tools/build.ps1)
 # for the distributable component; CMake intentionally covers the portable
 # parser/player, renderer and tests only.

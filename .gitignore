@@ -5,4 +5,5 @@
 *.wav
 *.foo_component
 /third_party/ymfm
+/C/
 /C/

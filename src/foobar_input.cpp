@@ -8,7 +8,7 @@
 DECLARE_COMPONENT_VERSION(
     "ASCII MUSIC.COM MML decoder", "0.1.16",
     "Plays PC-98 MUSIC.COM-style MML. Two loops, then an 8 second fade.");
-VALIDATE_COMPONENT_FILENAME("foo_musiccom.dll");
+VALIDATE_COMPONENT_FILENAME("foo_input_asciimusiccom.dll");
 class input_musiccom : public input_stubs {
   service_ptr_t<file> file_;
   std::string text_;

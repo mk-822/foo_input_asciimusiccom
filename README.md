@@ -1,25 +1,43 @@
-# foo_musiccom
+# foo_input_asciimusiccom
 
-foobar2000 2.x (64-bit) 用の ASCII `MUSIC.COM` MML 入力コンポーネントです。PC-98の YM2608 (OPNA) を `ymfm` でエミュレートします。無限ループ (`{0 ... }` または回数省略の `{ ... }`) は2回展開し、末尾8秒をフェードアウトします。
+ASCII `MUSIC.COM` 形式の MML ファイルを再生する、foobar2000 2.x（64-bit）向け入力コンポーネントです。PC-98 の YM2608（OPNA）を [ymfm](https://github.com/aaronsgiles/ymfm) でエミュレートします。
+
+> [!NOTE]
+> 開発中のコンポーネントです。MUSIC.COM のすべての構文や音源挙動との完全な互換性はありません。
 
 ## 現在の対応範囲
 
-- FM 3ch / SSG 3ch、`A`–`G`, `R`, `W`, `L`, `O`, `<`, `>`, `T`, `V`, `@`, `Q`, `N`, `Y`
-- `STR:` 文字列マクロ（再帰展開）、最大16段の反復、`SOUND:` FM音色、`SSGENV:` 読み込み
-- 2ループ、8秒フェード、シーク、48 kHz stereo float出力
-- MUSIC.COM Ver 2.21の静的解析補助ツール
+- FM 3 チャンネル、SSG 3 チャンネル
+- 音符 `A`–`G`、休符 `R` / `W`
+- `L`、`O`、`<`、`>`、`T`、`V`、`@`、`Q`、`Y`、`P`
+- スラー `&`、付点、繰り返し、入れ子の繰り返し
+- `STR:` マクロ、`SOUND:` FM 音色、`SSGENV:` ソフトウェアエンベロープ
+- 無限ループ表記（回数省略、`0`、`99`）を 2 ループ再生後、8 秒間フェードアウト
+- 48 kHz、ステレオ、32-bit floating-point PCM 出力
 
-`P/U/I`（ポルタメント、トレモロ、ビブラート）、SSGソフトウェアエンベロープ、リズムパートは解析途中で、現状は構文を読み飛ばします。音長丸めなどの未文書化挙動は実機バイナリのI/Oトレースを基準に詰める予定です。
+`N` / `I` / `U` / `S` / `M` など一部のコマンドは未実装または読み飛ばします。LFO、リズムパート、YM2608 ADPCM、細かなタイミングや音源挙動にも未実装・未検証の部分があります。
+
+## 必要なもの
+
+- Windows 10 または 11（x64）
+- foobar2000 2.x（64-bit）
+- Visual Studio 2022 の「C++ によるデスクトップ開発」
+- foobar2000 SDK
+- ymfm
+
+依存ソースはそれぞれ `third_party/foobar2000_sdk` と `third_party/ymfm` に配置します。リポジトリには含まれていません。
 
 ## ビルド
 
-Visual Studio 2022の「Desktop development with C++」を入れ、x64 Native Tools Command Promptで:
+x64 Native Tools Command Prompt for VS 2022 で実行します。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/build.ps1
 ```
 
-コア単体のテストとWAVレンダラーはCMakeでもビルドできます。
+成功すると `dist/foo_input_asciimusiccom.fb2k-component` が生成されます。ファイルを開くか、foobar2000 の Preferences → Components からインストールしてください。
+
+foobar2000 SDK を使わないコアライブラリ、テスト、WAV レンダラーは CMake だけでもビルドできます。
 
 ```powershell
 cmake -S . -B build
@@ -27,19 +45,19 @@ cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-生成された `dist/foo_musiccom.fb2k-component` を開くか、foobar2000のPreferences → Componentsからインストールします。単体確認は `musiccom_render input.mml output.wav` で行えます。
-
-## バイナリ解析
+単体レンダラーは次のように使用します。
 
 ```powershell
-python tools/analyze_musiccom.py "Z:\Music\chiptune_or_like\MML\MML_MAN\MUSIC.COM" -o musiccom-disasm.txt
+build\Release\musiccom_render.exe input.mml output.wav
 ```
 
-原資料や曲データは著作物なのでリポジトリには複製していません。テスト時に上記 `Z:` 配下を直接指定してください。
+## 互換性に関する資料
 
-## Third-party
+MUSIC.COM Ver. 2.21 のバイナリ解析メモは [docs/binary-analysis.md](docs/binary-analysis.md) にあります。これは実装仕様ではなく、互換性調査時の参考資料です。
 
-- foobar2000 SDK: SDK license (`third_party/foobar2000_sdk/sdk-license.txt`)
-- ymfm: BSD 3-Clause, Copyright Aaron Giles (`third_party/ymfm/LICENSE`)
+## Third-party licenses
 
-The vendored ymfm snapshot is commit `17decfae857b92ab55fbb30ade2287ace095a381`.
+- foobar2000 SDK: SDK license（`third_party/foobar2000_sdk/sdk-license.txt`）
+- ymfm: BSD 3-Clause License, Copyright Aaron Giles（`third_party/ymfm/LICENSE`）
+
+使用している ymfm のスナップショットは commit `17decfae857b92ab55fbb30ade2287ace095a381` です。
