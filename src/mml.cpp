@@ -280,7 +280,11 @@ void parse_track(int ch, std::string s, Song &song, double initial_tempo) {
         int midi = (octave + 1) * 12 + semis[idx] + acc;
         song.events.push_back(
             {time, EventType::NoteOn, ch, midi, continuing ? 1 : 0});
-        if (!tie)
+        // Q8 is MUSIC.COM's full-gate mode: the driver stores an infinite
+        // key-off countdown (1564h--15A5h), so W can extend the current sound
+        // past the written note length.  A following note or R performs the
+        // eventual key-off.  Q1--Q7 still use the timed gate below.
+        if (!tie && gate < 8)
           song.events.push_back(
               {time + dur * gate / 8.0, EventType::NoteOff, ch, 0, 0});
         continuing = tie;

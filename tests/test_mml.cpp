@@ -20,7 +20,7 @@ int main() {
     if (e.type == musiccom::EventType::NoteOn)
       on++;
   assert(on == 5);
-  auto tie = musiccom::parse_mml("1:T120 O4 C4 & C4 &D4\n", nofade);
+  auto tie = musiccom::parse_mml("1:T120 Q7 O4 C4 & C4 &D4\n", nofade);
   std::vector<musiccom::Event> notes;
   for (auto &e : tie.events)
     if (e.type == musiccom::EventType::NoteOn)
@@ -35,7 +35,7 @@ int main() {
       offs++;
   assert(offs == 1);
   auto boundary_tie =
-      musiccom::parse_mml("1:T120 O4 G4 P0 & G2\n", nofade);
+      musiccom::parse_mml("1:T120 Q7 O4 G4 P0 & G2\n", nofade);
   std::vector<musiccom::Event> boundary_notes;
   int boundary_offs = 0;
   for (auto &e : boundary_tie.events) {
@@ -47,6 +47,23 @@ int main() {
   assert(boundary_notes.size() == 2);
   assert(boundary_notes[0].b == 0 && boundary_notes[1].b == 1);
   assert(boundary_offs == 1);
+  // Q8 disables MUSIC.COM's timed key-off.  W then advances time without
+  // releasing the current note, as used by LEO_G tracks 1 and 3.
+  auto full_gate_wait =
+      musiccom::parse_mml("1:T100 Q8 O2 E1 W1 W1 R1\n", nofade);
+  int full_gate_offs = 0, full_gate_waits = 0, full_gate_rests = 0;
+  for (auto &e : full_gate_wait.events) {
+    if (e.type == musiccom::EventType::NoteOff)
+      ++full_gate_offs;
+    else if (e.type == musiccom::EventType::Rest) {
+      if (e.a != 0)
+        ++full_gate_waits;
+      else
+        ++full_gate_rests;
+    }
+  }
+  assert(full_gate_offs == 0);
+  assert(full_gate_waits == 2 && full_gate_rests == 1);
   auto porta = musiccom::parse_mml("1:T128 O4 C+ P4 D+4&D+ P0\n", nofade);
   int porta_on = 0, porta_off = 0;
   double porta_seconds = 0;
@@ -126,12 +143,13 @@ int main() {
   assert(std::abs(default_dot.duration - 2.0 / 1.1) < 1e-6);
   auto independent_loops = musiccom::parse_mml(
       "1:T120 {0 C1}\n2:T120 {0 C2}\n3:T120 {0 C4}\n", loop2_nofade);
-  double last[3]{};
+  int independent_notes[3]{};
   for (auto &e : independent_loops.events)
-    if (e.channel < 3)
-      last[e.channel] = std::max(last[e.channel], e.time);
-  assert(std::abs(last[0] - last[1]) < 1e-6);
-  assert(std::abs(last[0] - last[2]) < 1e-6);
+    if (e.type == musiccom::EventType::NoteOn && e.channel < 3)
+      ++independent_notes[e.channel];
+  assert(independent_notes[0] == 2);
+  assert(independent_notes[1] == 4);
+  assert(independent_notes[2] == 8);
   auto inherited = musiccom::parse_mml("1:T150 C4\n2:C4\n", nofade);
   assert(std::abs(inherited.duration - (0.4 / 1.1)) < 1e-6);
   auto ssg_env =
