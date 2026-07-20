@@ -13,7 +13,10 @@ $componentSource = Join-Path $projectRoot "src\foobar_input.cpp"
 $artifact = Join-Path $projectRoot "dist\foo_input_asciimusiccom.fb2k-component"
 
 function Invoke-Checked {
-    param([Parameter(Mandatory)][string]$Program, [Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
+    param(
+        [Parameter(Mandatory, Position = 0)][string]$Program,
+        [Parameter(Position = 1, ValueFromRemainingArguments = $true)][string[]]$Arguments
+    )
     & $Program @Arguments
     if ($LASTEXITCODE -ne 0) { throw "$Program failed with exit code $LASTEXITCODE" }
 }
