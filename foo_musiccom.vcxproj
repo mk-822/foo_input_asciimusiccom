@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{DF649E8A-B94A-4E61-9147-DBD9D3EC1D72}</ProjectGuid>
+    <RootNamespace>foo_musiccom</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType><PlatformToolset>v143</PlatformToolset><CharacterSet>Unicode</CharacterSet><WholeProgramOptimization>true</WholeProgramOptimization>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType><PlatformToolset>v143</PlatformToolset><CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <TargetName>foo_musiccom</TargetName><OutDir>$(ProjectDir)dist\</OutDir><IntDir>$(ProjectDir)build-msvc\$(Configuration)\</IntDir><LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel><SDLCheck>true</SDLCheck><LanguageStandard>stdcpp17</LanguageStandard><PrecompiledHeader>NotUsing</PrecompiledHeader><RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;$(ProjectDir)third_party\ymfm\src;$(ProjectDir)third_party\foobar2000_sdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>UNICODE;_UNICODE;NOMINMAX;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem><GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>$(ProjectDir)third_party\foobar2000_sdk\foobar2000\shared\shared-x64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="src\foobar_input.cpp" />
+    <ClCompile Include="src\mml.cpp" />
+    <ClCompile Include="src\player.cpp" />
+    <ClCompile Include="third_party\ymfm\src\ymfm_adpcm.cpp" />
+    <ClCompile Include="third_party\ymfm\src\ymfm_opn.cpp" />
+    <ClCompile Include="third_party\ymfm\src\ymfm_pcm.cpp" />
+    <ClCompile Include="third_party\ymfm\src\ymfm_ssg.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="third_party\foobar2000_sdk\pfc\pfc.vcxproj"><Project>{EBFFFB4E-261D-44D3-B89C-957B31A0BF9C}</Project><SetConfiguration>Configuration=Release FB2K;Platform=x64</SetConfiguration></ProjectReference>
+    <ProjectReference Include="third_party\foobar2000_sdk\foobar2000\SDK\foobar2000_SDK.vcxproj"><Project>{E8091321-D79D-4575-86EF-064EA1A4A20D}</Project></ProjectReference>
+    <ProjectReference Include="third_party\foobar2000_sdk\foobar2000\foobar2000_component_client\foobar2000_component_client.vcxproj"><Project>{71AD2674-065B-48F5-B8B0-E1F9D3892081}</Project></ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

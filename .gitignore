@@ -1,0 +1,6 @@
+/build-*/
+/dist/
+/musiccom-disasm.txt
+/third_party/foobar2000_sdk/
+*.wav
+*.foo_component
